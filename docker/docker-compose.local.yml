@@ -1,0 +1,19 @@
+version: '3.7'
+
+services:
+  algo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      - ./.env:/app/.env:ro
+    environment:
+      - KUMA_HOST=host.docker.internal
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # needed on Linux
