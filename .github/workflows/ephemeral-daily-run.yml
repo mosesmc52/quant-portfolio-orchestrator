@@ -50,7 +50,7 @@ jobs:
           DO_SSH_KEY_FINGERPRINT: ${{ secrets.DO_SSH_KEY_FINGERPRINT }}
 
           # Only required if your GHCR image is private
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
           # Your job secrets/vars (example set; adjust to your app)
@@ -63,6 +63,7 @@ jobs:
           SPACES_KEY: ${{ secrets.SPACES_KEY }}
           SPACES_SECRET: ${{ secrets.SPACES_SECRET }}
 
+          GHCR_USERNAME: ${{ vars.GHCR_USERNAME }}
           ALPACA_BASE_URL: ${{ vars.ALPACA_BASE_URL }}
           LIVE_TRADE: ${{ vars.LIVE_TRADE }}
           EMAIL_POSITIONS: ${{ vars.EMAIL_POSITIONS }}
