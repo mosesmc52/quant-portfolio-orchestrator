@@ -153,7 +153,7 @@ if EMAIL_POSITIONS:
 
     status = "Live" if is_live_trade else "Test"
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    subject = f"Quant Portfolio Orchestrator Report - {status} - {today}| Regime: {dominant_regime}"
+    subject = f"Quant Portfolio Orchestrator Report - {status} - {today}"
 
     for to_address in TO_ADDRESSES:
         ses.send_html_email(
