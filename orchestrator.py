@@ -19,23 +19,23 @@ load_dotenv(find_dotenv())
 weights_by_regime = {
     "stable_risk_on": {
         "trend": 1.0,
-        "triple_coint": 0.0,
-        "triple_vol": 0.0,
+        "triple-coint": 0.0,
+        "vol-harvest": 0.0,
     },
     "fragile": {
         "trend": 0.30,
-        "triple_coint": 0.50,
-        "triple_vol": 0.20,
+        "triple-coint": 0.50,
+        "vol-harvest": 0.20,
     },
     "vol_shock": {
         "trend": 0.0,
-        "triple_coint": 0.0,
-        "futures_trend": 1.0,
+        "triple_coint": 1.0,
+        "vol-harvest": 0.0,
     },
     "crisis": {
         "trend": 0.0,
-        "triple_coint": 1.00,
-        "triple_vol": 0.0,
+        "triple-coint": 1.0,
+        "vol-harvest": 0.0,
     },
 }
 
@@ -45,43 +45,43 @@ remote_files = (
     "etf-trend-rp-vt.json",
 )
 
-output_path = Path("./strategy_weights")
+output_path = Path("./strategy_targets")
 output_path.mkdir(parents=True, exist_ok=True)
-# spaces_region = os.environ.get("SPACES_REGION")
-# spaces_bucket = os.environ.get("SPACES_BUCKET")
-# spaces_access_key = os.environ.get("SPACES_KEY")
-# spaces_secret_key = os.environ.get("SPACES_SECRET")
-# spaces_object_key_prefix = os.environ.get("SPACES_OBJECT_KEY_PATH", "").strip("/")
+spaces_region = os.environ.get("SPACES_REGION")
+spaces_bucket = os.environ.get("SPACES_BUCKET")
+spaces_access_key = os.environ.get("SPACES_KEY")
+spaces_secret_key = os.environ.get("SPACES_SECRET")
+spaces_object_key_prefix = os.environ.get("SPACES_OBJECT_KEY_PATH", "").strip("/")
 
-# log(
-#     f"Downloading {len(remote_files)} strategy files from Spaces bucket "
-#     f"'{spaces_bucket}' into '{output_path.resolve()}'",
-#     "info",
-# )
-#
-# for filename in remote_files:
-#     local_path = output_path / filename
-#     object_key = (
-#         f"{spaces_object_key_prefix}/{filename}"
-#         if spaces_object_key_prefix
-#         else filename
-#     )
-#
-#     log(f"Downloading '{object_key}' -> '{local_path}'", "info")
-#
-#     download_file_from_digitalocean_spaces(
-#         file_path=str(local_path),
-#         region=spaces_region,
-#         object_key=object_key,
-#         bucket_name=spaces_bucket,
-#         access_key=spaces_access_key,
-#         secret_key=spaces_secret_key,
-#     )
-#
-# log(
-#     f"Downloaded {len(remote_files)} strategy files to '{output_path.resolve()}'",
-#     "info",
-# )
+log(
+    f"Downloading {len(remote_files)} strategy files from Spaces bucket "
+    f"'{spaces_bucket}' into '{output_path.resolve()}'",
+    "info",
+)
+
+for filename in remote_files:
+    local_path = output_path / filename
+    object_key = (
+        f"{spaces_object_key_prefix}/{filename}"
+        if spaces_object_key_prefix
+        else filename
+    )
+
+    log(f"Downloading '{object_key}' -> '{local_path}'", "info")
+
+    download_file_from_digitalocean_spaces(
+        file_path=str(local_path),
+        region=spaces_region,
+        object_key=object_key,
+        bucket_name=spaces_bucket,
+        access_key=spaces_access_key,
+        secret_key=spaces_secret_key,
+    )
+
+log(
+    f"Downloaded {len(remote_files)} strategy files to '{output_path.resolve()}'",
+    "info",
+)
 
 
 detector = RegimeDetector(
