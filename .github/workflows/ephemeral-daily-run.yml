@@ -73,6 +73,7 @@ jobs:
           SPACES_BUCKET: ${{ vars.SPACES_BUCKET }}
           SPACES_REGION: ${{ vars.SPACES_REGION }}
           SPACES_OBJECT_KEY_PATH: ${{ vars.SPACES_OBJECT_KEY_PATH }}
+          EQUITY_FRACTION: ${{ vars.EQUITY_FRACTION}}
 
         run: |
           set -euo pipefail
@@ -120,6 +121,7 @@ jobs:
                 SPACES_BUCKET=${SPACES_BUCKET}
                 SPACES_REGION=${SPACES_REGION}
                 SPACES_OBJECT_KEY_PATH=${SPACES_OBJECT_KEY_PATH}
+                EQUITY_FRACTION=${EQUITY_FRACTION}
             - path: /opt/job/run.sh
               permissions: "0700"
               content: |

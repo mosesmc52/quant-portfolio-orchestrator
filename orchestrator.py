@@ -6,6 +6,7 @@ from alpaca_adapter import AlpacaAPI
 from dotenv import find_dotenv, load_dotenv
 from helpers import (
     download_file_from_digitalocean_spaces,
+    getenv_float,
     print_orders_table,
     run_portfolio_regime_iteration,
     str2bool,
@@ -105,6 +106,7 @@ base_url = (os.getenv("ALPACA_BASE_URL") or "").lower()
 # Simple heuristic: treat "paper" URLs as paper trading
 is_paper = ("paper" in base_url) or str2bool(os.getenv("ALPACA_PAPER", True))
 is_live_trade = str2bool(os.getenv("LIVE_TRADE", False))
+equity_fraction = getenv_float(os.getenv("EQUITY_FRACTION"), 1.0)
 
 api = AlpacaAPI.from_env(
     api_key=alpaca_key,
@@ -120,6 +122,7 @@ portfolio = run_portfolio_regime_iteration(
     dominant_regime=dominant_regime,
     weights_by_regime=weights_by_regime,
     account=account,
+    equity_fraction=equity_fraction,
     api=api,
     is_paper=is_paper,
     is_live_trade=is_live_trade,

@@ -4,10 +4,9 @@ from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 
+import boto3
 from alpaca.common.exceptions import APIError
 from alpaca.data.timeframe import TimeFrame
-
-import boto3
 from log import log
 
 
@@ -30,6 +29,19 @@ def str2bool(value):
         return valid[lower_value]
     else:
         raise ValueError('invalid literal for boolean: "%s"' % value)
+
+
+def getenv_float(name: str, default: float) -> float:
+    """
+    Read an environment variable as a float.
+
+    - Returns `default` if the variable is missing
+    - Returns `default` if conversion fails
+    """
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _position_side_multiplier(position) -> int:
@@ -82,6 +94,7 @@ def run_portfolio_regime_iteration(
     api,
     is_paper,
     is_live_trade,
+    equity_fraction=1.0,
 ):
     weights_path = Path(strategy_weights_path).expanduser()
     regime_allocations = weights_by_regime.get(dominant_regime)
@@ -99,9 +112,14 @@ def run_portfolio_regime_iteration(
     if equity <= 0:
         raise ValueError("Account equity must be positive to size positions")
 
+    equity_fraction = _safe_float(equity_fraction, default=-1.0)
+    if not 0.0 <= equity_fraction <= 1.0:
+        raise ValueError("equity_fraction must be between 0 and 1 inclusive")
+
     log(
         f"Running regime iteration for '{dominant_regime}' using {len(strategy_files)} strategy files "
         f"on {'paper' if is_paper else 'live'} account with equity {equity:.2f} "
+        f"and trading allocation {equity_fraction:.2%} "
         f"(live_trade={'on' if is_live_trade else 'off'})",
         "info",
     )
@@ -140,6 +158,9 @@ def run_portfolio_regime_iteration(
             raw_weight = _safe_float(position.get("target_weight"))
             target_weights_by_symbol[symbol] += raw_weight * strategy_multiplier
 
+    for symbol in list(target_weights_by_symbol):
+        target_weights_by_symbol[symbol] *= equity_fraction
+
     if not target_weights_by_symbol:
         raise ValueError(
             f"No target allocations were produced for regime '{dominant_regime}'. "
@@ -147,7 +168,9 @@ def run_portfolio_regime_iteration(
         )
 
     open_positions = api.list_positions()
-    open_positions_by_symbol = {position.symbol: position for position in open_positions}
+    open_positions_by_symbol = {
+        position.symbol: position for position in open_positions
+    }
     current_weights_by_symbol = {}
     tradable_symbols = set(target_weights_by_symbol)
 
@@ -195,7 +218,13 @@ def run_portfolio_regime_iteration(
 
     if not order_candidates:
         log("No rebalance orders required for current regime targets", "success")
-        return {"dominant_regime": dominant_regime, "orders_submitted": 0, "target_weights": dict(target_weights_by_symbol)}
+        return {
+            "dominant_regime": dominant_regime,
+            "orders_submitted": 0,
+            "target_weights": dict(target_weights_by_symbol),
+            "equity_fraction": equity_fraction,
+            "is_live_trade": is_live_trade,
+        }
 
     order_candidates.sort(key=lambda item: item["delta_qty"])
     submitted_orders = []
@@ -259,6 +288,7 @@ def run_portfolio_regime_iteration(
         "orders_submitted": len(submitted_orders),
         "orders": submitted_orders,
         "target_weights": dict(target_weights_by_symbol),
+        "equity_fraction": equity_fraction,
         "is_live_trade": is_live_trade,
     }
 
@@ -270,6 +300,7 @@ def print_orders_table(result: dict) -> str:
     buf.write(f"Dominant regime: {result.get('dominant_regime', 'unknown')}\n")
     buf.write(
         f"Live trade: {'on' if result.get('is_live_trade') else 'off'} | "
+        f"Equity fraction: {float(result.get('equity_fraction', 1.0)):.2%} | "
         f"Orders submitted: {result.get('orders_submitted', 0)}\n"
     )
 
@@ -298,9 +329,7 @@ def print_orders_table(result: dict) -> str:
 
     def _write_row(values):
         buf.write(
-            " | ".join(
-                value.ljust(widths[index]) for index, value in enumerate(values)
-            )
+            " | ".join(value.ljust(widths[index]) for index, value in enumerate(values))
         )
         buf.write("\n")
 
