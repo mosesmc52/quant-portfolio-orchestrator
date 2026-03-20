@@ -106,7 +106,7 @@ base_url = (os.getenv("ALPACA_BASE_URL") or "").lower()
 # Simple heuristic: treat "paper" URLs as paper trading
 is_paper = ("paper" in base_url) or str2bool(os.getenv("ALPACA_PAPER", True))
 is_live_trade = str2bool(os.getenv("LIVE_TRADE", False))
-equity_fraction = getenv_float(os.getenv("EQUITY_FRACTION"), 1.0)
+equity_fraction = getenv_float("EQUITY_FRACTION", 1.0)
 
 api = AlpacaAPI.from_env(
     api_key=alpaca_key,
