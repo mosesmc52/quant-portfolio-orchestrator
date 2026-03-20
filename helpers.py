@@ -163,9 +163,10 @@ def run_portfolio_regime_iteration(
         target_weights_by_symbol[symbol] *= equity_fraction
 
     if not target_weights_by_symbol:
-        raise ValueError(
+        log(
             f"No target allocations were produced for regime '{dominant_regime}'. "
-            "Check strategy files and weights_by_regime."
+            "Proceeding with an empty target portfolio.",
+            "warning",
         )
 
     open_positions = api.list_positions()

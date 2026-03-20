@@ -30,7 +30,7 @@ weights_by_regime = {
     },
     "vol_shock": {
         "trend": 0.0,
-        "triple_coint": 1.0,
+        "triple-coint": 1.0,
         "vol-harvest": 0.0,
     },
     "crisis": {
