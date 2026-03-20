@@ -56,6 +56,19 @@ def _safe_float(value, default=0.0) -> float:
         return default
 
 
+def _safe_bool(value, default=False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return str2bool(value)
+        except ValueError:
+            return default
+    return bool(value)
+
+
 def _latest_price_for_symbol(api, symbol: str, open_positions_by_symbol: dict) -> float:
     existing_position = open_positions_by_symbol.get(symbol)
     if existing_position is not None:
@@ -131,9 +144,10 @@ def run_portfolio_regime_iteration(
     for strategy_file in strategy_files:
         payload = json.loads(strategy_file.read_text())
         strategy_name = payload.get("strategy")
-        if not payload.get("active", False):
-            log(f"Skipping inactive strategy file '{strategy_file.name}'", "warning")
-            continue
+        trade_today = _safe_bool(payload.get("trade_today", True), True)
+        liquidate_when_inactive = _safe_bool(
+            payload.get("liquidate_when_inactive", False), False
+        )
 
         regime_weight = _safe_float(regime_allocations.get(strategy_name))
         if regime_weight == 0:
@@ -148,11 +162,26 @@ def run_portfolio_regime_iteration(
         strategy_multiplier = regime_weight * capital_requested
         loaded_strategies += 1
 
-        log(
-            f"Including strategy '{strategy_name}' from '{strategy_file.name}' with multiplier "
-            f"{strategy_multiplier:.4f}",
-            "info",
-        )
+        if not trade_today:
+            if liquidate_when_inactive:
+                log(
+                    f"Strategy '{strategy_name}' from '{strategy_file.name}' is paused and "
+                    "configured to liquidate by targeting zero weight",
+                    "warning",
+                )
+                continue
+
+            log(
+                f"Holding strategy '{strategy_name}' from '{strategy_file.name}' steady "
+                "(trade_today=false)",
+                "warning",
+            )
+        else:
+            log(
+                f"Including strategy '{strategy_name}' from '{strategy_file.name}' with multiplier "
+                f"{strategy_multiplier:.4f}",
+                "info",
+            )
 
         for position in payload.get("positions", []):
             symbol = position["symbol"]
@@ -282,7 +311,7 @@ def run_portfolio_regime_iteration(
         )
 
     log(
-        f"Regime iteration complete: {len(submitted_orders)} orders submitted from {loaded_strategies} active strategies",
+        f"Regime iteration complete: {len(submitted_orders)} orders submitted from {loaded_strategies} strategy files",
         "success",
     )
     return {
