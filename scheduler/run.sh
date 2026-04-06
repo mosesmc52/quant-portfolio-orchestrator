@@ -3,11 +3,19 @@
 # - Success: sends status=up with run duration
 # - Failure: sends status=down with exit code
 
-echo "[$(date)] Running Quant Portfolio Orchestrator..."
-
 set -euo pipefail
 set -x
 export PYTHONUNBUFFERED=1
+
+RUN_LOG_FILE="${RUN_LOG_FILE:-/tmp/pairs-algo.log}"
+mkdir -p "$(dirname "$RUN_LOG_FILE")"
+touch "$RUN_LOG_FILE"
+
+# Mirror all script output to stdout so `docker run` emits it to the droplet log,
+# while also keeping an in-container copy for direct inspection if needed.
+exec > >(tee -a "$RUN_LOG_FILE") 2>&1
+
+echo "[$(date)] Running Quant Portfolio Orchestrator..."
 
 # ----------------------------
 # Load env (if present)
@@ -104,7 +112,7 @@ trap on_exit EXIT INT TERM
 # Run your job
 # ----------------------------
 cd /app
-poetry run python orchestrator.py
+poetry run python algo.py
 
 # Success heartbeat
 kuma_send "up" "${KUMA_MSG_OK:-ok}" "$(to_ms)" "0"
