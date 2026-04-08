@@ -9,6 +9,7 @@ DOCKER_COMPOSE ?= $(DOCKER) compose
 
 DO_FN_DIR ?= infra/do-functions
 DO_FN_ENV ?= $(DO_FN_DIR)/.env
+DO_FN_NAMESPACE ?= trading-strategy
 DO_FN_NAME ?= launcher/quant-portfolio-orchestrator
 
 DROPLET_USER ?= root
@@ -37,7 +38,7 @@ help:
 	@echo "  image-build          Build the GHCR image tag: $(IMAGE)"
 	@echo "  image-push           Push the GHCR image tag: $(IMAGE)"
 	@echo "  do-fn-validate       Validate DO Functions project metadata"
-	@echo "  do-fn-connect        Connect doctl to a DO Functions namespace"
+	@echo "  do-fn-connect        Connect doctl to DO Functions namespace: $(DO_FN_NAMESPACE)"
 	@echo "  do-fn-status         Show DO Functions connection status"
 	@echo "  do-fn-deploy         Deploy DO Functions with runtime env"
 	@echo "  do-fn-deploy-remote  Deploy DO Functions using remote build"
@@ -89,7 +90,7 @@ do-fn-validate:
 	doctl serverless get-metadata $(DO_FN_DIR)
 
 do-fn-connect:
-	doctl serverless connect
+	doctl serverless connect $(DO_FN_NAMESPACE)
 
 do-fn-status:
 	doctl serverless status
