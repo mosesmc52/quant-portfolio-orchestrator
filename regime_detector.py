@@ -111,75 +111,122 @@ class RegimeDetector:
         """
         Returns DataFrame indexed by Date with:
           RegimeLabel
-          VIXPct, SpreadPct (raw rolling percentiles)
-          VIXPctEMA, SpreadPctEMA (EMA-smoothed percentiles)
+          VIXPct, CreditStressPct
+          VIXPctEMA, CreditStressPctEMA
 
-        Drop-in update: do NOT label regimes until both EMA percentiles are valid.
-        This prevents early-window periods (e.g., 2008 if you start too late)
-        from defaulting to "Stable Risk-On" due to NaNs.
+        Design:
+          - Higher CreditStress always means worse credit.
+          - No regime label is assigned until both EMA signals are valid.
+          - If self.shift_regime_by_one_day=True, regime labels are based on
+            yesterday's completed signals so the output is directly tradable
+            for today's allocation.
+
+        Backward-compatible aliases are also returned:
+          - SpreadPct = CreditStressPct
+          - SpreadPctEMA = CreditStressPctEMA
         """
-        data = self.fetch_data(start_date=start_date, end_date=end_date)
+        data = self.fetch_data(start_date=start_date, end_date=end_date).copy()
 
-        # Credit proxy
+        required_cols = {"^VIX", "HYG", "LQD"}
+        missing = required_cols.difference(data.columns)
+        if missing:
+            raise ValueError(f"Missing required columns from fetched data: {sorted(missing)}")
+
+        # -----------------------------
+        # Credit stress proxy
+        # Higher must always mean worse credit.
+        # -----------------------------
         if self.credit_mode == "ratio":
-            data["CreditProxy"] = data["HYG"] / data["LQD"]
+            # HYG/LQD rising generally means credit improving/risk-on.
+            # Invert to LQD/HYG so higher means more credit stress.
+            data["CreditStress"] = data["LQD"] / data["HYG"]
+        elif self.credit_mode == "diff":
+            # HYG - LQD falling generally means credit worsening.
+            # Invert to LQD - HYG so higher means more credit stress.
+            data["CreditStress"] = data["LQD"] - data["HYG"]
         else:
-            data["CreditProxy"] = data["HYG"] - data["LQD"]
+            raise ValueError("credit_mode must be either 'ratio' or 'diff'.")
 
+        # -----------------------------
         # Rolling percentiles
+        # Higher percentile = more stress.
+        # -----------------------------
         data["VIXPct"] = (
             data["^VIX"]
             .rolling(self.lookback)
             .apply(_rolling_last_percentile, raw=True)
         )
-        data["SpreadPct"] = (
-            data["CreditProxy"]
+
+        data["CreditStressPct"] = (
+            data["CreditStress"]
             .rolling(self.lookback)
             .apply(_rolling_last_percentile, raw=True)
         )
 
-        # EMA smoothing on percentiles
+        # Backward-compatible aliases for older downstream code.
+        data["SpreadPct"] = data["CreditStressPct"]
+
+        # -----------------------------
+        # EMA smoothing
+        # -----------------------------
         minp = (
             int(self.ema_min_periods)
             if self.ema_min_periods is not None
             else int(self.ema_span)
         )
+
         data["VIXPctEMA"] = (
             data["VIXPct"]
             .ewm(span=self.ema_span, adjust=False, min_periods=minp)
             .mean()
         )
-        data["SpreadPctEMA"] = (
-            data["SpreadPct"]
+
+        data["CreditStressPctEMA"] = (
+            data["CreditStressPct"]
             .ewm(span=self.ema_span, adjust=False, min_periods=minp)
             .mean()
         )
 
-        # Only classify when both signals are finite
-        valid = np.isfinite(data["VIXPctEMA"]) & np.isfinite(data["SpreadPctEMA"])
+        # Backward-compatible alias for older downstream code.
+        data["SpreadPctEMA"] = data["CreditStressPctEMA"]
 
-        vol_high = data["VIXPctEMA"] > self.vix_high_pct
-        spread_wide = data["SpreadPctEMA"] > self.spread_wide_pct
+        # -----------------------------
+        # Signal alignment
+        # -----------------------------
+        if self.shift_regime_by_one_day:
+            # Use yesterday's completed signals for today's allocation.
+            vix_sig = data["VIXPctEMA"].shift(1)
+            credit_sig = data["CreditStressPctEMA"].shift(1)
+        else:
+            # Research/diagnostic mode only; not directly executable same-day.
+            vix_sig = data["VIXPctEMA"]
+            credit_sig = data["CreditStressPctEMA"]
 
+        valid = np.isfinite(vix_sig) & np.isfinite(credit_sig)
 
-        # Initialize as object dtype
+        vol_high = vix_sig > self.vix_high_pct
+        credit_stressed = credit_sig > self.spread_wide_pct
+
+        # -----------------------------
+        # Regime labels
+        # -----------------------------
         data["RegimeLabel"] = pd.Series(index=data.index, dtype="object")
-        
-        valid = (
-            np.isfinite(data["VIXPctEMA"]) &
-            np.isfinite(data["SpreadPctEMA"])
-        )
-        
-        vol_high = data["VIXPctEMA"] > self.vix_high_pct
-        spread_wide = data["SpreadPctEMA"] > self.spread_wide_pct
-        
+
         data.loc[valid, "RegimeLabel"] = "Stable Risk-On"
-        data.loc[valid & (~vol_high) & (spread_wide), "RegimeLabel"] = "Fragile"
-        data.loc[valid & (vol_high) & (~spread_wide), "RegimeLabel"] = "Vol Shock"
-        data.loc[valid & (vol_high) & (spread_wide), "RegimeLabel"] = "Crisis"
+        data.loc[valid & (~vol_high) & credit_stressed, "RegimeLabel"] = "Fragile"
+        data.loc[valid & vol_high & (~credit_stressed), "RegimeLabel"] = "Vol Shock"
+        data.loc[valid & vol_high & credit_stressed, "RegimeLabel"] = "Crisis"
 
         return data[
-            ["RegimeLabel", "VIXPct", "SpreadPct", "VIXPctEMA", "SpreadPctEMA"]
+            [
+                "RegimeLabel",
+                "VIXPct",
+                "CreditStressPct",
+                "SpreadPct",
+                "VIXPctEMA",
+                "CreditStressPctEMA",
+                "SpreadPctEMA",
+            ]
         ].copy()
 
     # ----------------------------
@@ -209,8 +256,8 @@ class RegimeDetector:
         Dominant regime is computed over the last `dominance_window` trading days
         (defaults to self.dominance_window).
 
-        If shift_regime_by_one_day=True, uses yesterday's regime label for today's decision
-        (aligns with run_portfolio_regime_test lookahead fix).
+        build_regimes() already handles signal shifting when
+        shift_regime_by_one_day=True, so no additional shift is applied here.
         """
         dom_w = int(dominance_window or self.dominance_window)
 
@@ -232,14 +279,6 @@ class RegimeDetector:
             raise RuntimeError(
                 "No regime rows available up to as_of date (check yfinance availability)."
             )
-
-        if self.shift_regime_by_one_day:
-            regimes["RegimeLabel"] = regimes["RegimeLabel"].shift(1)
-            regimes = regimes.dropna(subset=["RegimeLabel"])
-            if regimes.empty:
-                raise RuntimeError(
-                    "After shifting RegimeLabel by 1 day, no data remains (increase padding)."
-                )
 
         window = regimes.tail(dom_w)
         if window.empty:
@@ -292,7 +331,7 @@ class RegimeDetector:
         include_key: bool = True,
     ) -> pd.DataFrame:
         """
-        Returns last n_days of regimes (shifted if configured).
+        Returns last n_days of regimes. build_regimes() already handles signal shifting when configured.
         """
         as_of_ts = (
             pd.Timestamp.today().normalize()
@@ -307,10 +346,6 @@ class RegimeDetector:
 
         regimes = self.build_regimes(start_date=start_ts, end_date=end_ts)
         regimes = regimes.loc[regimes.index <= as_of_ts].copy()
-
-        if self.shift_regime_by_one_day:
-            regimes["RegimeLabel"] = regimes["RegimeLabel"].shift(1)
-            regimes = regimes.dropna(subset=["RegimeLabel"])
 
         tail = regimes.tail(int(n_days)).copy()
         if include_key:

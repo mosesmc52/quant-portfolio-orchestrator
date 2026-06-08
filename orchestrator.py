@@ -24,9 +24,9 @@ weights_by_regime = {
         "vol-harvest": 0.0,
     },
     "fragile": {
-        "trend": 0.30,
+        "trend": 0.20,
         "triple-coint": 0.50,
-        "vol-harvest": 0.20,
+        "vol-harvest": 0.30,
     },
     "vol_shock": {
         "trend": 0.0,
@@ -35,8 +35,8 @@ weights_by_regime = {
     },
     "crisis": {
         "trend": 0.0,
-        "triple-coint": 1.0,
-        "vol-harvest": 0.0,
+        "triple-coint": 0.4,
+        "vol-harvest": 0.6,
     },
 }
 
