@@ -40,7 +40,7 @@ class RegimeDetector:
     vix_high_pct: float = 0.70
     spread_wide_pct: float = 0.70
     lookback: int = 252
-    credit_mode: str = "ratio"  # "ratio" | "diff"
+    credit_mode: str = "ratio"  # "ratio" | "diff" | "legacy_diff"
     dominance_window: int = 20  # mode over last N days
     shift_regime_by_one_day: bool = True  # align with backtest (lookahead fix)
 
@@ -53,8 +53,8 @@ class RegimeDetector:
     LABEL_TO_KEY: Dict[str, RegimeKey] = None  # set in __post_init__
 
     def __post_init__(self):
-        if self.credit_mode not in ("ratio", "diff"):
-            raise ValueError("credit_mode must be one of: 'ratio', 'diff'")
+        if self.credit_mode not in ("ratio", "diff", "legacy_diff"):
+            raise ValueError("credit_mode must be one of: 'ratio', 'diff', 'legacy_diff'")
         if not (0.0 < self.vix_high_pct < 1.0):
             raise ValueError("vix_high_pct must be in (0, 1)")
         if not (0.0 < self.spread_wide_pct < 1.0):
@@ -144,8 +144,12 @@ class RegimeDetector:
             # HYG - LQD falling generally means credit worsening.
             # Invert to LQD - HYG so higher means more credit stress.
             data["CreditStress"] = data["LQD"] - data["HYG"]
+        elif self.credit_mode == "legacy_diff":
+            # Backward-compatible notebook behavior:
+            # treat higher HYG - LQD percentile as "wider" credit spread.
+            data["CreditStress"] = data["HYG"] - data["LQD"]
         else:
-            raise ValueError("credit_mode must be either 'ratio' or 'diff'.")
+            raise ValueError("credit_mode must be one of: 'ratio', 'diff', 'legacy_diff'.")
 
         # -----------------------------
         # Rolling percentiles

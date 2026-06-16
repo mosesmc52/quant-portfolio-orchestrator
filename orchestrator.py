@@ -20,28 +20,33 @@ load_dotenv(find_dotenv())
 weights_by_regime = {
     "stable_risk_on": {
         "trend": 1.0,
-        "triple-coint": 0.0,
+        "pairs-coint": 0.0,
         "vol-harvest": 0.0,
+        "etf-trend-regime": 0.0,
     },
     "fragile": {
-        "trend": 0.20,
-        "triple-coint": 0.50,
-        "vol-harvest": 0.30,
+        "trend": 0.80,
+        "pairs-coint": 0.20,
+        "vol-harvest": 0.00,
+        "etf-trend-regime": 0.0,
     },
     "vol_shock": {
         "trend": 0.0,
-        "triple-coint": 1.0,
-        "vol-harvest": 0.0,
+        "pairs-coint": 0.0,
+        "vol-harvest": 1.0,
+        "etf-trend-regime": 0.0,
     },
     "crisis": {
         "trend": 0.0,
-        "triple-coint": 0.4,
-        "vol-harvest": 0.6,
+        "pairs-coint": 0.0,
+        "vol-harvest": 0.0,
+        "etf-trend-regime": 1.0,
     },
 }
 
 remote_files = (
-    "etf-triple-pairs.json",
+    "etf-pairs-cointegration.json",
+    "etf-trend-regime.json",
     "etf-volatility-harvest.json",
     "etf-trend-rp-vt.json",
 )
@@ -90,7 +95,7 @@ detector = RegimeDetector(
     lookback=252,
     vix_high_pct=0.70,
     spread_wide_pct=0.70,
-    credit_mode="ratio",
+    credit_mode="legacy_diff",
     shift_regime_by_one_day=True,
 )
 as_of = datetime.now()
