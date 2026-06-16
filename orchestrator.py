@@ -25,8 +25,8 @@ weights_by_regime = {
         "etf-trend-regime": 0.0,
     },
     "fragile": {
-        "trend": 0.80,
-        "pairs-coint": 0.20,
+        "trend": 0.70,
+        "pairs-coint": 0.30,
         "vol-harvest": 0.00,
         "etf-trend-regime": 0.0,
     },
