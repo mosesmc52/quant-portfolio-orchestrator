@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -98,6 +99,14 @@ def _latest_price_for_symbol(api, symbol: str, open_positions_by_symbol: dict) -
     if close_price <= 0:
         raise ValueError(f"Invalid close price returned for symbol '{symbol}'")
     return close_price
+
+
+def _whole_share_target(quantity: float) -> int:
+    return math.trunc(quantity)
+
+
+def _whole_share_order_qty(delta_quantity: float) -> int:
+    return int(math.floor(abs(delta_quantity) + 0.5))
 
 
 def run_portfolio_regime_iteration(
@@ -222,6 +231,7 @@ def run_portfolio_regime_iteration(
 
         price = _latest_price_for_symbol(api, symbol, open_positions_by_symbol)
         target_qty = (target_weight * equity) / price
+        target_qty_whole = _whole_share_target(target_qty)
 
         current_position = open_positions_by_symbol.get(symbol)
         if current_position is not None:
@@ -230,8 +240,9 @@ def run_portfolio_regime_iteration(
         else:
             current_qty = 0.0
 
-        delta_qty = target_qty - current_qty
-        if abs(delta_qty) < 0.01:
+        delta_qty = target_qty_whole - current_qty
+        order_qty = _whole_share_order_qty(delta_qty)
+        if order_qty < 1:
             continue
 
         order_candidates.append(
@@ -242,8 +253,9 @@ def run_portfolio_regime_iteration(
                 "current_weight": current_weight,
                 "delta_weight": delta_weight,
                 "current_qty": current_qty,
-                "target_qty": target_qty,
+                "target_qty": target_qty_whole,
                 "delta_qty": delta_qty,
+                "order_qty": order_qty,
             }
         )
 
@@ -262,7 +274,7 @@ def run_portfolio_regime_iteration(
 
     for candidate in order_candidates:
         side = "buy" if candidate["delta_qty"] > 0 else "sell"
-        qty = round(abs(candidate["delta_qty"]), 6)
+        qty = candidate["order_qty"]
         if qty <= 0:
             continue
 
@@ -346,7 +358,7 @@ def print_orders_table(result: dict) -> str:
             (
                 str(order.get("symbol", "")),
                 str(order.get("side", "")),
-                f"{float(order.get('qty', 0)):.6f}",
+                str(int(order.get("qty", 0))),
                 f"{float(order.get('target_weight', 0)):.4f}",
                 f"{float(order.get('current_weight', 0)):.4f}",
                 str(order.get("order_id", "")),
