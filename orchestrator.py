@@ -21,33 +21,38 @@ weights_by_regime = {
     "stable_risk_on": {
         "trend": 1.0,
         "pairs-coint": 0.0,
-        "vol-harvest": 0.0,
-        "etf-trend-regime": 0.0,
+        # "vol-harvest": 0.0,
+        "etf-trend-regime-vol-shock": 0.0,
+        "etf-trend-regime-crisis": 0.0,
     },
     "fragile": {
         "trend": 0.70,
         "pairs-coint": 0.30,
-        "vol-harvest": 0.00,
-        "etf-trend-regime": 0.0,
+        # "vol-harvest": 0.00,
+        "etf-trend-regime-vol-shock": 0.0,
+        "etf-trend-regime-crisis": 0.0,
     },
     "vol_shock": {
         "trend": 0.0,
         "pairs-coint": 0.0,
-        "vol-harvest": 1.0,
-        "etf-trend-regime": 0.0,
+        # "vol-harvest": 1.0,
+        "etf-trend-regime-vol-shock": 1.0,
+        "etf-trend-regime-crisis": 0.0,
     },
     "crisis": {
         "trend": 0.0,
         "pairs-coint": 0.0,
-        "vol-harvest": 0.0,
-        "etf-trend-regime": 1.0,
+        # "vol-harvest": 0.0,
+        "etf-trend-regime-vol-shock": 0.0,
+        "etf-trend-regime-crisis": 1.0,
     },
 }
 
 remote_files = (
     "etf-pairs-cointegration.json",
-    "etf-trend-regime.json",
-    "etf-volatility-harvest.json",
+    "etf-trend-regime-crisis.json",
+    "etf-trend-regime-vol-shock.json",
+    # "etf-volatility-harvest.json",
     "etf-trend-rp-vt.json",
 )
 
