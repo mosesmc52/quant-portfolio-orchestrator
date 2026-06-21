@@ -1,6 +1,9 @@
+import json
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from alpaca_adapter import AlpacaAPI
 from dotenv import find_dotenv, load_dotenv
@@ -16,6 +19,10 @@ from regime_detector import RegimeDetector
 from SES import AmazonSES
 
 load_dotenv(find_dotenv())
+
+ZILLAIQ_API_BASE_URL = os.getenv(
+    "ZILLAIQ_API_BASE_URL", "https://portfolio.zillaiq.com"
+).rstrip("/")
 
 weights_by_regime = {
     "stable_risk_on": {
@@ -109,44 +116,151 @@ dominant_regime = result["dominant_regime"]
 log(f"Regime Detected: {dominant_regime}", "info")
 
 
-alpaca_key = os.getenv("ALPACA_KEY_ID")
-alpaca_secret = os.getenv("ALPACA_SECRET_KEY")
-base_url = (os.getenv("ALPACA_BASE_URL") or "").lower()
-
-# Simple heuristic: treat "paper" URLs as paper trading
-is_paper = ("paper" in base_url) or str2bool(os.getenv("ALPACA_PAPER", True))
 is_live_trade = str2bool(os.getenv("LIVE_TRADE", False))
 equity_fraction = getenv_float("EQUITY_FRACTION", 1.0)
 
-api = AlpacaAPI.from_env(
-    api_key=alpaca_key,
-    secret_key=alpaca_secret,
-    paper=is_paper,
-)
 
-account = api.get_account()
-portfolio_value = round(float(account.equity), 3)
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value.strip()
 
-portfolio = run_portfolio_regime_iteration(
-    strategy_weights_path=output_path,
-    dominant_regime=dominant_regime,
-    weights_by_regime=weights_by_regime,
-    account=account,
-    equity_fraction=equity_fraction,
-    api=api,
-    is_paper=is_paper,
-    is_live_trade=is_live_trade,
-)
+
+def request_json(method: str, url: str, payload: dict | None = None, token: str | None = None):
+    headers = {"Accept": "application/json"}
+    body = None
+
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = Request(url=url, data=body, headers=headers, method=method)
+
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"{method} {url} failed with HTTP {exc.code}: {detail}"
+        ) from exc
+    except URLError as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+
+
+def fetch_active_alpaca_credentials() -> list[dict]:
+    username = require_env("ZILLAIQ_USERNAME")
+    password = require_env("ZILLAIQ_PASSWORD")
+
+    token_response = request_json(
+        "POST",
+        f"{ZILLAIQ_API_BASE_URL}/api/token",
+        payload={"username": username, "password": password},
+    )
+    access_token = token_response.get("access")
+    if not access_token:
+        raise RuntimeError("Token response did not include an access token.")
+
+    credentials = request_json(
+        "GET",
+        f"{ZILLAIQ_API_BASE_URL}/api/credentials/active",
+        token=access_token,
+    )
+    if not isinstance(credentials, list) or not credentials:
+        raise RuntimeError("No active credentials were returned by the API.")
+
+    alpaca_credentials = [
+        item
+        for item in credentials
+        if str(item.get("broker", "")).upper() == "ALPACA"
+        and item.get("key_id")
+        and item.get("secret_key")
+    ]
+    if not alpaca_credentials:
+        raise RuntimeError("No active ALPACA credentials were returned by the API.")
+
+    log(
+        f"Using {len(alpaca_credentials)} active ALPACA credential(s) from the API",
+        "info",
+    )
+    return alpaca_credentials
+
+
+credential_reports = []
+
+for credential in fetch_active_alpaca_credentials():
+    alpaca_key = credential["key_id"]
+    alpaca_secret = credential["secret_key"]
+    environment = str(credential.get("environment", "")).strip().lower()
+    is_paper = environment in {"paper", "sandbox"}
+
+    log(
+        "Running active ALPACA credential "
+        f"id={credential.get('id')} client={credential.get('client_name')} "
+        f"strategy={credential.get('fund_strategy_code')} environment={environment or 'unknown'}",
+        "info",
+    )
+
+    api = AlpacaAPI.from_env(
+        api_key=alpaca_key,
+        secret_key=alpaca_secret,
+        paper=is_paper,
+    )
+
+    account = api.get_account()
+    portfolio_value = round(float(account.equity), 3)
+
+    portfolio = run_portfolio_regime_iteration(
+        strategy_weights_path=output_path,
+        dominant_regime=dominant_regime,
+        weights_by_regime=weights_by_regime,
+        account=account,
+        equity_fraction=equity_fraction,
+        api=api,
+        is_paper=is_paper,
+        is_live_trade=is_live_trade,
+    )
+
+    credential_reports.append(
+        {
+            "credential": credential,
+            "environment": environment,
+            "portfolio_value": portfolio_value,
+            "portfolio": portfolio,
+        }
+    )
 
 # Email Positions
 EMAIL_POSITIONS = str2bool(os.getenv("EMAIL_POSITIONS", False))
 
-orders_table = print_orders_table(portfolio)
-orders_table_html = orders_table.replace("\n", "<br>")
-message_body_html = (
-    f"Portfolio Value: {portfolio_value}<br><pre>{orders_table_html}</pre>"
-)
-message_body_plain = f"Portfolio Value: {portfolio_value}\n{orders_table}"
+message_sections_plain = []
+message_sections_html = []
+
+for report in credential_reports:
+    credential = report["credential"]
+    orders_table = print_orders_table(report["portfolio"])
+    orders_table_html = orders_table.replace("\n", "<br>")
+    header = (
+        f"Client: {credential.get('client_name', 'unknown')} | "
+        f"Strategy: {credential.get('fund_strategy_code', 'unknown')} | "
+        f"Environment: {report['environment'] or 'unknown'} | "
+        f"Credential ID: {credential.get('id', 'unknown')}"
+    )
+    message_sections_plain.append(
+        f"{header}\nPortfolio Value: {report['portfolio_value']}\n{orders_table}"
+    )
+    message_sections_html.append(
+        f"{header}<br>"
+        f"Portfolio Value: {report['portfolio_value']}<br>"
+        f"<pre>{orders_table_html}</pre>"
+    )
+
+message_body_plain = "\n\n".join(message_sections_plain)
+message_body_html = "<br><br>".join(message_sections_html)
 
 print("---------------------------------------------------\n")
 print(message_body_plain)

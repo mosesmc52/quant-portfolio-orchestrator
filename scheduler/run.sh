@@ -27,8 +27,8 @@ set +a
 # ----------------------------
 # Sanity checks (don’t print secrets)
 # ----------------------------
-: "${ALPACA_KEY_ID:?ALPACA_KEY_ID not set}"
-: "${ALPACA_SECRET_KEY:?ALPACA_SECRET_KEY not set}"
+: "${ZILLAIQ_USERNAME:?ZILLAIQ_USERNAME not set}"
+: "${ZILLAIQ_PASSWORD:?ZILLAIQ_PASSWORD not set}"
 
 # Kuma config (same as yours)
 # --- Kuma config / URL building ---
