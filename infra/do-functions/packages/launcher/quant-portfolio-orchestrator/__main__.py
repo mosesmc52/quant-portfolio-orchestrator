@@ -56,9 +56,9 @@ write_files:
       AWS_SES_ACCESS_KEY_ID={env.get("AWS_SES_ACCESS_KEY_ID", "")}
       AWS_SES_SECRET_ACCESS_KEY={env.get("AWS_SES_SECRET_ACCESS_KEY", "")}
       LIVE_TRADE={env.get("LIVE_TRADE", "")}
-      ALPACA_BASE_URL={env.get("ALPACA_BASE_URL", "")}
-      ALPACA_KEY_ID={env.get("ALPACA_KEY_ID", "")}
-      ALPACA_SECRET_KEY={env.get("ALPACA_SECRET_KEY", "")}
+      ZILLAIQ_API_BASE_URL={env.get("ZILLAIQ_API_BASE_URL", "")}
+      ZILLAIQ_USERNAME={env.get("ZILLAIQ_USERNAME", "")}
+      ZILLAIQ_PASSWORD={env.get("ZILLAIQ_PASSWORD", "")}
       SPACES_KEY={env.get("SPACES_KEY", "")}
       SPACES_SECRET={env.get("SPACES_SECRET", "")}
       SPACES_BUCKET={env.get("SPACES_BUCKET", "")}
@@ -165,9 +165,9 @@ def main(event, context):
                 "AWS_SES_ACCESS_KEY_ID": optional_env("AWS_SES_ACCESS_KEY_ID"),
                 "AWS_SES_SECRET_ACCESS_KEY": optional_env("AWS_SES_SECRET_ACCESS_KEY"),
                 "LIVE_TRADE": optional_env("LIVE_TRADE"),
-                "ALPACA_BASE_URL": optional_env("ALPACA_BASE_URL"),
-                "ALPACA_KEY_ID": optional_env("ALPACA_KEY_ID"),
-                "ALPACA_SECRET_KEY": optional_env("ALPACA_SECRET_KEY"),
+                "ZILLAIQ_API_BASE_URL": optional_env("ZILLAIQ_API_BASE_URL"),
+                "ZILLAIQ_USERNAME": optional_env("ZILLAIQ_USERNAME"),
+                "ZILLAIQ_PASSWORD": optional_env("ZILLAIQ_PASSWORD"),
                 "SPACES_KEY": optional_env("SPACES_KEY"),
                 "SPACES_SECRET": optional_env("SPACES_SECRET"),
                 "SPACES_BUCKET": optional_env("SPACES_BUCKET"),
