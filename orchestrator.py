@@ -405,7 +405,7 @@ if EMAIL_POSITIONS:
         from_address=FROM_ADDRESS,
     )
 
-    status = "Live" if is_live_trade else "Test"
+    status = "Live" if is_live_trade else "Paper"
     today = datetime.utcnow().strftime("%Y-%m-%d")
     subject = f"Quant Portfolio Orchestrator Report - {status} - {today}"
 
