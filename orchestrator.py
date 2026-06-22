@@ -357,6 +357,7 @@ message_sections_html = []
 
 for report in credential_reports:
     credential = report["credential"]
+    total_portfolios_updated = len(credential_reports)
     strategy_allocations = build_strategy_allocations(
         strategy_weights_path=output_path,
         dominant_regime=report["portfolio"]["dominant_regime"],
@@ -372,11 +373,15 @@ for report in credential_reports:
         f"Credential ID: {credential.get('id', 'unknown')}"
     )
     message_sections_plain.append(
-        f"{header}\nRegime: {report['portfolio']['dominant_regime']}\n{strategy_allocations_plain}"
+        f"{header}\n"
+        f"Total Portfolios Updated: {total_portfolios_updated}\n"
+        f"Regime: {report['portfolio']['dominant_regime']}\n"
+        f"{strategy_allocations_plain}"
     )
 
     message_sections_html.append(
         f"{header}<br><br>"
+        f"Total Portfolios Updated: {total_portfolios_updated}<br>"
         f"Regime: {report['portfolio']['dominant_regime']}<br>"
         f"<pre>{strategy_allocations_html}</pre>"
     )
