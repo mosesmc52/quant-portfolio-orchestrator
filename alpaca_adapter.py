@@ -15,6 +15,9 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 
+ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
+
 
 @dataclass
 class AlpacaAPI:
@@ -39,8 +42,18 @@ class AlpacaAPI:
         *,
         paper: bool,
     ) -> "AlpacaAPI":
-        trading = TradingClient(api_key, secret_key, paper=paper)
-        data = StockHistoricalDataClient(api_key, secret_key)
+        base_url = ALPACA_PAPER_BASE_URL if paper else ALPACA_LIVE_BASE_URL
+        trading = TradingClient(
+            api_key,
+            secret_key,
+            paper=paper,
+            url_override=base_url,
+        )
+        data = StockHistoricalDataClient(
+            api_key,
+            secret_key,
+            url_override=base_url,
+        )
         return cls(trading=trading, data=data)
 
     # ---- Trading compatibility ----

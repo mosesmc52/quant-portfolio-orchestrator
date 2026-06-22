@@ -21,7 +21,7 @@ from SES import AmazonSES
 load_dotenv(find_dotenv())
 
 ZILLAIQ_API_BASE_URL = os.getenv(
-    "ZILLAIQ_API_BASE_URL", "https://portfolio.zillaiq.com"
+    "ZILLAIQ_API_BASE_URL", "http://localhost:8000"
 ).rstrip("/")
 
 weights_by_regime = {
@@ -127,7 +127,9 @@ def require_env(name: str) -> str:
     return value.strip()
 
 
-def request_json(method: str, url: str, payload: dict | None = None, token: str | None = None):
+def request_json(
+    method: str, url: str, payload: dict | None = None, token: str | None = None
+):
     headers = {"Accept": "application/json"}
     body = None
 
@@ -158,7 +160,7 @@ def fetch_active_alpaca_credentials() -> list[dict]:
 
     token_response = request_json(
         "POST",
-        f"{ZILLAIQ_API_BASE_URL}/api/token",
+        f"{ZILLAIQ_API_BASE_URL}/api/token/",
         payload={"username": username, "password": password},
     )
     access_token = token_response.get("access")
@@ -193,6 +195,7 @@ def fetch_active_alpaca_credentials() -> list[dict]:
 credential_reports = []
 
 for credential in fetch_active_alpaca_credentials():
+
     alpaca_key = credential["key_id"]
     alpaca_secret = credential["secret_key"]
     environment = str(credential.get("environment", "")).strip().lower()
