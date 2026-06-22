@@ -10,7 +10,6 @@ from dotenv import find_dotenv, load_dotenv
 from helpers import (
     download_file_from_digitalocean_spaces,
     getenv_float,
-    print_orders_table,
     run_portfolio_regime_iteration,
     str2bool,
 )
@@ -155,6 +154,26 @@ def request_json(
 
 
 def fetch_active_alpaca_credentials() -> list[dict]:
+    alpaca_key_id = str(os.getenv("ALPACA_KEY_ID", "")).strip()
+    alpaca_secret_key = str(os.getenv("ALPACA_SECRET_KEY", "")).strip()
+
+    if alpaca_key_id and alpaca_secret_key:
+        log(
+            "Using ALPACA credentials from environment variables",
+            "info",
+        )
+        return [
+            {
+                "id": "env",
+                "client_name": "environment",
+                "fund_strategy_code": "environment",
+                "environment": os.getenv("ALPACA_ENVIRONMENT", "paper"),
+                "broker": "ALPACA",
+                "key_id": alpaca_key_id,
+                "secret_key": alpaca_secret_key,
+            }
+        ]
+
     username = require_env("ZILLAIQ_USERNAME")
     password = require_env("ZILLAIQ_PASSWORD")
 
@@ -192,6 +211,101 @@ def fetch_active_alpaca_credentials() -> list[dict]:
     return alpaca_credentials
 
 
+def build_strategy_allocations(
+    strategy_weights_path: Path,
+    dominant_regime: str,
+    weights_by_regime: dict[str, dict[str, float]],
+    equity_fraction: float,
+) -> list[dict]:
+    regime_allocations = weights_by_regime.get(dominant_regime, {})
+    strategy_allocations = []
+
+    for strategy_file in sorted(Path(strategy_weights_path).glob("*.json")):
+        payload = json.loads(strategy_file.read_text())
+        strategy_name = str(payload.get("strategy", strategy_file.stem))
+        trade_today = str2bool(payload.get("trade_today", True))
+        liquidate_when_inactive = str2bool(
+            payload.get("liquidate_when_inactive", False)
+        )
+        regime_weight = float(regime_allocations.get(strategy_name, 0.0))
+
+        if regime_weight == 0:
+            continue
+
+        if not trade_today and liquidate_when_inactive:
+            continue
+
+        capital_requested = float(payload.get("capital_requested", 1.0) or 1.0)
+        strategy_weight = regime_weight * capital_requested * equity_fraction
+        positions = []
+
+        for position in payload.get("positions", []):
+            symbol = str(position.get("symbol", "")).strip()
+            if not symbol:
+                continue
+
+            target_weight = float(position.get("target_weight", 0.0) or 0.0)
+            positions.append(
+                {
+                    "symbol": symbol,
+                    "target_weight": target_weight * strategy_weight,
+                }
+            )
+
+        positions.sort(key=lambda item: item["symbol"])
+        strategy_allocations.append(
+            {
+                "strategy": strategy_name,
+                "target_weight": strategy_weight,
+                "positions": positions,
+            }
+        )
+
+    return strategy_allocations
+
+
+def format_strategy_allocations_plain(strategy_allocations: list[dict]) -> str:
+    if not strategy_allocations:
+        return "No strategy allocations."
+
+    lines = []
+    for index, strategy in enumerate(strategy_allocations):
+        lines.append(f"{strategy['strategy']}: {float(strategy['target_weight']):.2%}")
+        positions = strategy.get("positions", [])
+        if not positions:
+            lines.append("  No ticker allocations.")
+        else:
+            for position in positions:
+                lines.append(
+                    f"  {position['symbol']}: {float(position['target_weight']):.2%}"
+                )
+        if index < len(strategy_allocations) - 1:
+            lines.append("-" * 32)
+
+    return "\n".join(lines)
+
+
+def format_strategy_allocations_html(strategy_allocations: list[dict]) -> str:
+    if not strategy_allocations:
+        return "No strategy allocations."
+
+    sections = []
+    for strategy in strategy_allocations:
+        lines = [f"{strategy['strategy']}: {float(strategy['target_weight']):.2%}"]
+        positions = strategy.get("positions", [])
+        if not positions:
+            lines.append("&nbsp;&nbsp;No ticker allocations.")
+        else:
+            for position in positions:
+                lines.append(
+                    f"&nbsp;&nbsp;{position['symbol']}: {float(position['target_weight']):.2%}"
+                )
+        lines.append("--------------------------------")
+        sections.append("<br>".join(lines))
+
+    return "<br>".join(sections)
+
+
 credential_reports = []
 
 for credential in fetch_active_alpaca_credentials():
@@ -215,7 +329,6 @@ for credential in fetch_active_alpaca_credentials():
     )
 
     account = api.get_account()
-    portfolio_value = round(float(account.equity), 3)
 
     portfolio = run_portfolio_regime_iteration(
         strategy_weights_path=output_path,
@@ -232,7 +345,6 @@ for credential in fetch_active_alpaca_credentials():
         {
             "credential": credential,
             "environment": environment,
-            "portfolio_value": portfolio_value,
             "portfolio": portfolio,
         }
     )
@@ -245,8 +357,14 @@ message_sections_html = []
 
 for report in credential_reports:
     credential = report["credential"]
-    orders_table = print_orders_table(report["portfolio"])
-    orders_table_html = orders_table.replace("\n", "<br>")
+    strategy_allocations = build_strategy_allocations(
+        strategy_weights_path=output_path,
+        dominant_regime=report["portfolio"]["dominant_regime"],
+        weights_by_regime=weights_by_regime,
+        equity_fraction=float(report["portfolio"].get("equity_fraction", 1.0)),
+    )
+    strategy_allocations_plain = format_strategy_allocations_plain(strategy_allocations)
+    strategy_allocations_html = format_strategy_allocations_html(strategy_allocations)
     header = (
         f"Client: {credential.get('client_name', 'unknown')} | "
         f"Strategy: {credential.get('fund_strategy_code', 'unknown')} | "
@@ -254,12 +372,13 @@ for report in credential_reports:
         f"Credential ID: {credential.get('id', 'unknown')}"
     )
     message_sections_plain.append(
-        f"{header}\nPortfolio Value: {report['portfolio_value']}\n{orders_table}"
+        f"{header}\nRegime: {report['portfolio']['dominant_regime']}\n{strategy_allocations_plain}"
     )
+
     message_sections_html.append(
-        f"{header}<br>"
-        f"Portfolio Value: {report['portfolio_value']}<br>"
-        f"<pre>{orders_table_html}</pre>"
+        f"{header}<br><br>"
+        f"Regime: {report['portfolio']['dominant_regime']}<br>"
+        f"<pre>{strategy_allocations_html}</pre>"
     )
 
 message_body_plain = "\n\n".join(message_sections_plain)
