@@ -176,6 +176,7 @@ def fetch_active_alpaca_credentials() -> list[dict]:
 
     username = require_env("ZILLAIQ_USERNAME")
     password = require_env("ZILLAIQ_PASSWORD")
+    print(f"username: {username}, password: {password}")
 
     token_response = request_json(
         "POST",
