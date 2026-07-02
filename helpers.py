@@ -147,7 +147,9 @@ def run_portfolio_regime_iteration(
         "info",
     )
 
-    target_weights_by_symbol = defaultdict(float)
+    active_target_weights_by_symbol = defaultdict(float)
+    protected_target_weights_by_symbol = defaultdict(float)
+    liquidating_symbols = set()
     loaded_strategies = 0
 
     for strategy_file in strategy_files:
@@ -157,7 +159,6 @@ def run_portfolio_regime_iteration(
         liquidate_when_inactive = _safe_bool(
             payload.get("liquidate_when_inactive", False), False
         )
-
         regime_weight = _safe_float(regime_allocations.get(strategy_name))
         if regime_weight == 0:
             log(
@@ -167,38 +168,71 @@ def run_portfolio_regime_iteration(
             )
             continue
 
-        capital_requested = _safe_float(payload.get("capital_requested", 1.0), 1.0)
-        strategy_multiplier = regime_weight * capital_requested
-        loaded_strategies += 1
-
         if not trade_today:
             if liquidate_when_inactive:
                 log(
                     f"Strategy '{strategy_name}' from '{strategy_file.name}' is paused and "
-                    "configured to liquidate by targeting zero weight",
+                    "will be liquidated (trade_today=false, liquidate_when_inactive=true)",
                     "warning",
                 )
-                continue
+                for position in payload.get("positions", []):
+                    symbol = str(position.get("symbol", "")).strip()
+                    if symbol:
+                        liquidating_symbols.add(symbol)
+            else:
+                log(
+                    f"Strategy '{strategy_name}' from '{strategy_file.name}' is paused and "
+                    "its allocations will be preserved without rebalancing (trade_today=false)",
+                    "warning",
+                )
+                capital_requested = _safe_float(
+                    payload.get("capital_requested", 1.0), 1.0
+                )
+                strategy_multiplier = regime_weight * capital_requested
+                for position in payload.get("positions", []):
+                    symbol = str(position.get("symbol", "")).strip()
+                    if symbol:
+                        raw_weight = _safe_float(position.get("target_weight"))
+                        protected_target_weights_by_symbol[symbol] += (
+                            raw_weight * strategy_multiplier
+                        )
+            continue
 
-            log(
-                f"Holding strategy '{strategy_name}' from '{strategy_file.name}' steady "
-                "(trade_today=false)",
-                "warning",
-            )
-        else:
-            log(
-                f"Including strategy '{strategy_name}' from '{strategy_file.name}' with multiplier "
-                f"{strategy_multiplier:.4f}",
-                "info",
-            )
+        capital_requested = _safe_float(payload.get("capital_requested", 1.0), 1.0)
+        strategy_multiplier = regime_weight * capital_requested
+        loaded_strategies += 1
+        log(
+            f"Including strategy '{strategy_name}' from '{strategy_file.name}' with multiplier "
+            f"{strategy_multiplier:.4f}",
+            "info",
+        )
 
         for position in payload.get("positions", []):
             symbol = position["symbol"]
             raw_weight = _safe_float(position.get("target_weight"))
-            target_weights_by_symbol[symbol] += raw_weight * strategy_multiplier
+            active_target_weights_by_symbol[symbol] += raw_weight * strategy_multiplier
 
-    for symbol in list(target_weights_by_symbol):
-        target_weights_by_symbol[symbol] *= equity_fraction
+    scaled_active_target_weights_by_symbol = {
+        symbol: weight * equity_fraction
+        for symbol, weight in active_target_weights_by_symbol.items()
+    }
+    scaled_protected_target_weights_by_symbol = {
+        symbol: weight * equity_fraction
+        for symbol, weight in protected_target_weights_by_symbol.items()
+    }
+    target_weights_by_symbol = defaultdict(float)
+    all_target_symbols = set(scaled_active_target_weights_by_symbol) | set(
+        scaled_protected_target_weights_by_symbol
+    )
+    for symbol in all_target_symbols:
+        target_weights_by_symbol[symbol] = (
+            scaled_active_target_weights_by_symbol.get(symbol, 0.0)
+            + scaled_protected_target_weights_by_symbol.get(symbol, 0.0)
+        )
+
+    protected_only_symbols = set(protected_target_weights_by_symbol) - set(
+        active_target_weights_by_symbol
+    )
 
     if not target_weights_by_symbol:
         log(
@@ -212,26 +246,25 @@ def run_portfolio_regime_iteration(
         position.symbol: position for position in open_positions
     }
     current_weights_by_symbol = {}
-    tradable_symbols = set(target_weights_by_symbol)
+    tradable_symbols = set(active_target_weights_by_symbol) | liquidating_symbols
 
     for position in open_positions:
         symbol = position.symbol
-        tradable_symbols.add(symbol)
+        if symbol not in protected_only_symbols or symbol in liquidating_symbols:
+            tradable_symbols.add(symbol)
         market_value = _safe_float(getattr(position, "market_value", None))
         current_weights_by_symbol[symbol] = market_value / equity
 
     order_candidates = []
     for symbol in sorted(tradable_symbols):
         target_weight = target_weights_by_symbol.get(symbol, 0.0)
+        active_target_weight = scaled_active_target_weights_by_symbol.get(symbol, 0.0)
+        protected_target_weight = scaled_protected_target_weights_by_symbol.get(
+            symbol, 0.0
+        )
         current_weight = current_weights_by_symbol.get(symbol, 0.0)
-        delta_weight = target_weight - current_weight
-
-        if abs(delta_weight) < 0.0025:
-            continue
 
         price = _latest_price_for_symbol(api, symbol, open_positions_by_symbol)
-        target_qty = (target_weight * equity) / price
-        target_qty_whole = _whole_share_target(target_qty)
 
         current_position = open_positions_by_symbol.get(symbol)
         if current_position is not None:
@@ -240,7 +273,27 @@ def run_portfolio_regime_iteration(
         else:
             current_qty = 0.0
 
-        delta_qty = target_qty_whole - current_qty
+        if protected_target_weight > 0:
+            rebalance_current_weight = max(
+                current_weight - protected_target_weight, 0.0
+            )
+            rebalance_target_weight = active_target_weight
+            protected_qty = _whole_share_target(
+                (protected_target_weight * equity) / price
+            )
+            rebalance_current_qty = max(current_qty - protected_qty, 0.0)
+        else:
+            rebalance_current_weight = current_weight
+            rebalance_target_weight = target_weight
+            rebalance_current_qty = current_qty
+
+        delta_weight = rebalance_target_weight - rebalance_current_weight
+        if abs(delta_weight) < 0.0025:
+            continue
+
+        target_qty = (rebalance_target_weight * equity) / price
+        target_qty_whole = _whole_share_target(target_qty)
+        delta_qty = target_qty_whole - rebalance_current_qty
         order_qty = _whole_share_order_qty(delta_qty)
         if order_qty < 1:
             continue
@@ -251,6 +304,9 @@ def run_portfolio_regime_iteration(
                 "price": price,
                 "target_weight": target_weight,
                 "current_weight": current_weight,
+                "protected_target_weight": protected_target_weight,
+                "rebalance_target_weight": rebalance_target_weight,
+                "rebalance_current_weight": rebalance_current_weight,
                 "delta_weight": delta_weight,
                 "current_qty": current_qty,
                 "target_qty": target_qty_whole,
@@ -281,6 +337,7 @@ def run_portfolio_regime_iteration(
         log(
             f"{side.upper()} {candidate['symbol']} qty={qty} "
             f"target_w={candidate['target_weight']:.4f} current_w={candidate['current_weight']:.4f} "
+            f"protected_w={candidate['protected_target_weight']:.4f} "
             f"px={candidate['price']:.2f}",
             "info",
         )
