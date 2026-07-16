@@ -8,13 +8,15 @@ from urllib.request import Request, urlopen
 from alpaca_adapter import AlpacaAPI
 from dotenv import find_dotenv, load_dotenv
 from helpers import (
+    build_layered_regime_key,
     download_file_from_digitalocean_spaces,
     getenv_float,
+    resolve_regime_allocations,
     run_portfolio_regime_iteration,
     str2bool,
 )
+from layered_regime_detector import LayeredRegimeDetector
 from log import log
-from regime_detector import RegimeDetector
 from SES import AmazonSES
 
 load_dotenv(find_dotenv())
@@ -49,6 +51,18 @@ weights_by_regime = {
         "etf-trend-regime-crisis": 1.0,
     },
 }
+
+COMBINE_MODE = os.getenv("COMBINE_MODE", "and").strip().lower()
+
+# Each key in weights_by_regime is a selector. Examples:
+# "stable_risk_on"
+# "bull"
+# "strong_positive"
+# "bull__strong_positive"
+# "stable_risk_on__bull__strong_positive__contango"
+#
+# combine_mode="and" requires all selector parts to be active on the same day.
+# combine_mode="or" matches when any selector part is active on that day.
 
 remote_files = (
     "etf-trend-regime-fragile.json",
@@ -96,18 +110,38 @@ log(
 )
 
 
-detector = RegimeDetector(
-    ema_span=60,
-    lookback=252,
+detector = LayeredRegimeDetector(
+    risk_ema_span=60,
+    risk_lookback=252,
     vix_high_pct=0.70,
-    spread_wide_pct=0.70,
+    credit_high_pct=0.70,
     credit_mode="legacy_diff",
-    shift_regime_by_one_day=True,
+    shift_signals_by_one_day=True,
 )
 as_of = datetime.now()
 result = detector.dominant_regime(as_of=as_of)
-dominant_regime = result["dominant_regime"]
-log(f"Regime Detected: {dominant_regime}", "info")
+risk_regime = result["risk"]["key"]
+trend_regime = result["trend"]["key"]
+momentum_regime = result["momentum"]["key"]
+vol_structure_regime = result["volatility_structure"]["key"]
+dominant_regime = build_layered_regime_key(
+    risk_key=risk_regime,
+    trend_key=trend_regime,
+    momentum_key=momentum_regime,
+    vol_structure_key=vol_structure_regime,
+)
+active_regime_keys = [
+    dominant_regime,
+    risk_regime,
+    trend_regime,
+    momentum_regime,
+    vol_structure_regime,
+]
+log(
+    f"Regime Detected: {dominant_regime} "
+    f"(active keys: {active_regime_keys}, combine_mode={COMBINE_MODE})",
+    "info",
+)
 
 
 is_live_trade = str2bool(os.getenv("LIVE_TRADE", False))
@@ -211,8 +245,14 @@ def build_strategy_allocations(
     dominant_regime: str,
     weights_by_regime: dict[str, dict[str, float]],
     equity_fraction: float,
+    active_regime_keys: list[str],
+    combine_mode: str,
 ) -> list[dict]:
-    regime_allocations = weights_by_regime.get(dominant_regime, {})
+    _, regime_allocations = resolve_regime_allocations(
+        weights_by_regime=weights_by_regime,
+        active_regime_keys=active_regime_keys,
+        combine_mode=combine_mode,
+    )
     strategy_allocations = []
 
     for strategy_file in sorted(Path(strategy_weights_path).glob("*.json")):
@@ -329,11 +369,13 @@ for credential in fetch_active_alpaca_credentials():
         strategy_weights_path=output_path,
         dominant_regime=dominant_regime,
         weights_by_regime=weights_by_regime,
+        active_regime_keys=active_regime_keys,
         account=account,
         equity_fraction=equity_fraction,
         api=api,
         is_paper=is_paper,
         is_live_trade=is_live_trade,
+        combine_mode=COMBINE_MODE,
     )
 
     credential_reports.append(
@@ -358,6 +400,8 @@ for report in credential_reports:
         dominant_regime=report["portfolio"]["dominant_regime"],
         weights_by_regime=weights_by_regime,
         equity_fraction=float(report["portfolio"].get("equity_fraction", 1.0)),
+        active_regime_keys=list(report["portfolio"].get("active_regime_keys", [])),
+        combine_mode=str(report["portfolio"].get("combine_mode", COMBINE_MODE)),
     )
     strategy_allocations_plain = format_strategy_allocations_plain(strategy_allocations)
     strategy_allocations_html = format_strategy_allocations_html(strategy_allocations)
@@ -371,6 +415,8 @@ for report in credential_reports:
         f"{header}\n"
         f"Total Portfolios Updated: {total_portfolios_updated}\n"
         f"Regime: {report['portfolio']['dominant_regime']}\n"
+        f"Combine Mode: {report['portfolio'].get('combine_mode', COMBINE_MODE)}\n"
+        f"Matched Weights: {', '.join(report['portfolio'].get('matched_regimes', []))}\n"
         f"{strategy_allocations_plain}"
     )
 
@@ -378,6 +424,8 @@ for report in credential_reports:
         f"{header}<br><br>"
         f"Total Portfolios Updated: {total_portfolios_updated}<br>"
         f"Regime: {report['portfolio']['dominant_regime']}<br>"
+        f"Combine Mode: {report['portfolio'].get('combine_mode', COMBINE_MODE)}<br>"
+        f"Matched Weights: {', '.join(report['portfolio'].get('matched_regimes', []))}<br>"
         f"<pre>{strategy_allocations_html}</pre>"
     )
 

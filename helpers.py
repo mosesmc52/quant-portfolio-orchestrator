@@ -109,20 +109,76 @@ def _whole_share_order_qty(delta_quantity: float) -> int:
     return int(math.floor(abs(delta_quantity) + 0.5))
 
 
+def build_layered_regime_key(
+    risk_key: str,
+    trend_key: str,
+    momentum_key: str,
+    vol_structure_key: str,
+) -> str:
+    return "__".join((risk_key, trend_key, momentum_key, vol_structure_key))
+
+
+def _normalize_combine_mode(combine_mode: str | None) -> str:
+    mode = str(combine_mode or "and").strip().lower()
+    if mode not in {"and", "or"}:
+        raise ValueError("combine_mode must be 'and' or 'or'")
+    return mode
+
+
+def resolve_regime_allocations(
+    weights_by_regime: dict,
+    active_regime_keys: list[str],
+    combine_mode: str = "and",
+) -> tuple[list[str], dict]:
+    mode = _normalize_combine_mode(combine_mode)
+    active_regime_set = {key for key in active_regime_keys if key}
+    matched_regimes = []
+    combined_allocations = defaultdict(float)
+
+    for regime_key, regime_allocations in weights_by_regime.items():
+        selector_parts = [part for part in str(regime_key).split("__") if part]
+        if not selector_parts:
+            continue
+
+        if mode == "and":
+            matched = all(part in active_regime_set for part in selector_parts)
+        else:
+            matched = any(part in active_regime_set for part in selector_parts)
+
+        if not matched:
+            continue
+
+        matched_regimes.append(str(regime_key))
+        for strategy_name, weight in regime_allocations.items():
+            combined_allocations[str(strategy_name)] += _safe_float(weight)
+
+    if not matched_regimes:
+        raise ValueError(
+            "No regime weights configured for active regimes "
+            f"{sorted(active_regime_set)} using combine_mode='{mode}'"
+        )
+
+    return matched_regimes, dict(combined_allocations)
+
+
 def run_portfolio_regime_iteration(
     strategy_weights_path,
     dominant_regime,
     weights_by_regime,
+    active_regime_keys,
     account,
     api,
     is_paper,
     is_live_trade,
     equity_fraction=1.0,
+    combine_mode="and",
 ):
     weights_path = Path(strategy_weights_path).expanduser()
-    regime_allocations = weights_by_regime.get(dominant_regime)
-    if not regime_allocations:
-        raise ValueError(f"No regime weights configured for regime '{dominant_regime}'")
+    matched_regimes, regime_allocations = resolve_regime_allocations(
+        weights_by_regime=weights_by_regime,
+        active_regime_keys=active_regime_keys,
+        combine_mode=combine_mode,
+    )
 
     if not weights_path.exists():
         raise FileNotFoundError(f"Strategy weights path does not exist: {weights_path}")
@@ -140,7 +196,9 @@ def run_portfolio_regime_iteration(
         raise ValueError("equity_fraction must be between 0 and 1 inclusive")
 
     log(
-        f"Running regime iteration for '{dominant_regime}' using {len(strategy_files)} strategy files "
+        f"Running regime iteration for detected regime '{dominant_regime}' "
+        f"using combine_mode='{_normalize_combine_mode(combine_mode)}' and matched weights "
+        f"{matched_regimes} with {len(strategy_files)} strategy files "
         f"on {'paper' if is_paper else 'live'} account with equity {equity:.2f} "
         f"and trading allocation {equity_fraction:.2%} "
         f"(live_trade={'on' if is_live_trade else 'off'})",
@@ -319,7 +377,10 @@ def run_portfolio_regime_iteration(
         log("No rebalance orders required for current regime targets", "success")
         return {
             "dominant_regime": dominant_regime,
+            "active_regime_keys": list(active_regime_keys),
             "orders_submitted": 0,
+            "matched_regimes": matched_regimes,
+            "combine_mode": _normalize_combine_mode(combine_mode),
             "target_weights": dict(target_weights_by_symbol),
             "equity_fraction": equity_fraction,
             "is_live_trade": is_live_trade,
@@ -385,6 +446,9 @@ def run_portfolio_regime_iteration(
     )
     return {
         "dominant_regime": dominant_regime,
+        "active_regime_keys": list(active_regime_keys),
+        "matched_regimes": matched_regimes,
+        "combine_mode": _normalize_combine_mode(combine_mode),
         "orders_submitted": len(submitted_orders),
         "orders": submitted_orders,
         "target_weights": dict(target_weights_by_symbol),
