@@ -31,22 +31,22 @@ weights_by_regime = {
         "etf-trend-regime-crisis": 0.0,
     },
     "fragile": {
-        "trend": 0.0,
-        "etf-trend-regime-fragile": 1.0,
+        "trend": 1.0,
+        "etf-trend-regime-fragile": 0.0,
         "etf-trend-regime-vol-shock": 0.0,
         "etf-trend-regime-crisis": 0.0,
     },
     "vol_shock": {
-        "trend": 0.0,
+        "trend": 1.0,
         "etf-trend-regime-fragile": 0.0,
-        "etf-trend-regime-vol-shock": 1.0,
+        "etf-trend-regime-vol-shock": 0.0,
         "etf-trend-regime-crisis": 0.0,
     },
     "crisis": {
-        "trend": 0.0,
+        "trend": 1.0,
         "etf-trend-regime-fragile": 0.0,
         "etf-trend-regime-vol-shock": 0.0,
-        "etf-trend-regime-crisis": 1.0,
+        "etf-trend-regime-crisis": 0.0,
     },
 }
 
