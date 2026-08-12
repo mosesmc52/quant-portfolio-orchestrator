@@ -152,10 +152,17 @@ def run_portfolio_regime_iteration(
     liquidating_symbols = set()
     loaded_strategies = 0
 
+    open_positions = api.list_positions()
+    account_has_positions = bool(open_positions)
+    initialized_portfolio = False
+
     for strategy_file in strategy_files:
         payload = json.loads(strategy_file.read_text())
         strategy_name = payload.get("strategy")
         trade_today = _safe_bool(payload.get("trade_today", True), True)
+        initialize_portfolio = _safe_bool(
+            payload.get("initialize_portfolio", False), False
+        )
         liquidate_when_inactive = _safe_bool(
             payload.get("liquidate_when_inactive", False), False
         )
@@ -169,6 +176,33 @@ def run_portfolio_regime_iteration(
             continue
 
         if not trade_today:
+            should_initialize = (
+                not account_has_positions
+                and initialize_portfolio
+                and not liquidate_when_inactive
+            )
+            if should_initialize:
+                initialized_portfolio = True
+                loaded_strategies += 1
+                log(
+                    f"Strategy '{strategy_name}' from '{strategy_file.name}' is paused, "
+                    "but will initialize the empty account because "
+                    "initialize_portfolio=true",
+                    "warning",
+                )
+                capital_requested = _safe_float(
+                    payload.get("capital_requested", 1.0), 1.0
+                )
+                strategy_multiplier = regime_weight * capital_requested
+                for position in payload.get("positions", []):
+                    symbol = str(position.get("symbol", "")).strip()
+                    if symbol:
+                        raw_weight = _safe_float(position.get("target_weight"))
+                        active_target_weights_by_symbol[symbol] += (
+                            raw_weight * strategy_multiplier
+                        )
+                continue
+
             if liquidate_when_inactive:
                 log(
                     f"Strategy '{strategy_name}' from '{strategy_file.name}' is paused and "
@@ -241,7 +275,6 @@ def run_portfolio_regime_iteration(
             "warning",
         )
 
-    open_positions = api.list_positions()
     open_positions_by_symbol = {
         position.symbol: position for position in open_positions
     }
@@ -323,6 +356,7 @@ def run_portfolio_regime_iteration(
             "target_weights": dict(target_weights_by_symbol),
             "equity_fraction": equity_fraction,
             "is_live_trade": is_live_trade,
+            "initialized_portfolio": initialized_portfolio,
         }
 
     order_candidates.sort(key=lambda item: item["delta_qty"])
@@ -390,6 +424,7 @@ def run_portfolio_regime_iteration(
         "target_weights": dict(target_weights_by_symbol),
         "equity_fraction": equity_fraction,
         "is_live_trade": is_live_trade,
+        "initialized_portfolio": initialized_portfolio,
     }
 
 
