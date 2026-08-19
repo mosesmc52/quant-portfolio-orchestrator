@@ -17,6 +17,7 @@ from alpaca.trading.requests import MarketOrderRequest
 
 ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
+ALPACA_MARKET_DATA_BASE_URL = "https://data.alpaca.markets"
 
 
 @dataclass
@@ -52,7 +53,9 @@ class AlpacaAPI:
         data = StockHistoricalDataClient(
             api_key,
             secret_key,
-            url_override=base_url,
+            # Market data is served from a separate API host. The paper/live
+            # distinction applies to trading, not to the historical data API.
+            url_override=ALPACA_MARKET_DATA_BASE_URL,
         )
         return cls(trading=trading, data=data)
 
