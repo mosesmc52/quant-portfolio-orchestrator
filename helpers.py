@@ -118,6 +118,7 @@ def run_portfolio_regime_iteration(
     is_paper,
     is_live_trade,
     equity_fraction=1.0,
+    strategy_files=None,
 ):
     weights_path = Path(strategy_weights_path).expanduser()
     regime_allocations = weights_by_regime.get(dominant_regime)
@@ -127,7 +128,11 @@ def run_portfolio_regime_iteration(
     if not weights_path.exists():
         raise FileNotFoundError(f"Strategy weights path does not exist: {weights_path}")
 
-    strategy_files = sorted(weights_path.glob("*.json"))
+    strategy_files = (
+        sorted(weights_path.glob("*.json"))
+        if strategy_files is None
+        else [Path(strategy_file) for strategy_file in strategy_files]
+    )
     if not strategy_files:
         raise FileNotFoundError(f"No strategy weight files found in: {weights_path}")
 

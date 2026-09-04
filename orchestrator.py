@@ -56,6 +56,7 @@ remote_files = (
     "etf-trend-regime-vol-shock.json",
     "etf-trend-rp-vt.json",
 )
+today = datetime.now().date().isoformat()
 
 output_path = Path("./strategy_targets")
 output_path.mkdir(parents=True, exist_ok=True)
@@ -71,18 +72,21 @@ log(
     "info",
 )
 
+active_strategy_files = []
+skipped_strategy_files = []
 for filename in remote_files:
     local_path = output_path / filename
+    download_path = output_path / f".{filename}.download"
     object_key = (
         f"{spaces_object_key_prefix}/{filename}"
         if spaces_object_key_prefix
         else filename
     )
 
-    log(f"Downloading '{object_key}' -> '{local_path}'", "info")
+    log(f"Downloading '{object_key}' -> '{download_path}'", "info")
 
     download_file_from_digitalocean_spaces(
-        file_path=str(local_path),
+        file_path=str(download_path),
         region=spaces_region,
         object_key=object_key,
         bucket_name=spaces_bucket,
@@ -90,10 +94,75 @@ for filename in remote_files:
         secret_key=spaces_secret_key,
     )
 
+    payload = json.loads(download_path.read_text())
+    updated_date = str(payload.get("updated_date", "")).strip()
+    if updated_date != today:
+        download_path.unlink(missing_ok=True)
+        skipped_strategy_files.append(
+            {
+                "filename": filename,
+                "updated_date": updated_date or "missing",
+            }
+        )
+        log(
+            f"Skipping '{filename}': updated_date={updated_date or 'missing'} "
+            f"does not match today ({today})",
+            "warning",
+        )
+        continue
+
+    download_path.replace(local_path)
+    active_strategy_files.append(local_path)
+
 log(
-    f"Downloaded {len(remote_files)} strategy files to '{output_path.resolve()}'",
+    f"Accepted {len(active_strategy_files)} current strategy files to "
+    f"'{output_path.resolve()}'",
     "info",
 )
+
+if not active_strategy_files:
+    log(
+        f"No strategy files have updated_date={today}; no portfolios will be updated.",
+        "warning",
+    )
+
+    if str2bool(os.getenv("EMAIL_POSITIONS", False)):
+        to_addresses = [
+            address.strip()
+            for address in os.getenv("TO_ADDRESSES", "").split(",")
+            if address.strip()
+        ]
+        ses = AmazonSES(
+            region=os.environ.get("AWS_SES_REGION_NAME"),
+            access_key=os.environ.get("AWS_SES_ACCESS_KEY_ID"),
+            secret_key=os.environ.get("AWS_SES_SECRET_ACCESS_KEY"),
+            from_address=os.getenv("FROM_ADDRESS", ""),
+        )
+        skipped_lines = "\n".join(
+            f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+            for item in skipped_strategy_files
+        )
+        skipped_html = "<br>".join(
+            f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+            for item in skipped_strategy_files
+        )
+        subject = (
+            "Quant Portfolio Orchestrator Report - "
+            f"No portfolio update - {today}"
+        )
+        for to_address in to_addresses:
+            ses.send_html_email(
+                to_address=to_address,
+                subject=subject,
+                content=(
+                    "<h3>No portfolio update was performed</h3>"
+                    "<p>The following strategies were skipped because their updated date "
+                    "did not match today:</p>"
+                    f"<p>{skipped_html or 'None'}</p>"
+                    f"<pre>{skipped_lines or 'None'}</pre>"
+                ),
+            )
+    raise SystemExit(0)
 
 
 detector = RegimeDetector(
@@ -211,11 +280,17 @@ def build_strategy_allocations(
     dominant_regime: str,
     weights_by_regime: dict[str, dict[str, float]],
     equity_fraction: float,
+    strategy_files=None,
 ) -> list[dict]:
     regime_allocations = weights_by_regime.get(dominant_regime, {})
     strategy_allocations = []
 
-    for strategy_file in sorted(Path(strategy_weights_path).glob("*.json")):
+    strategy_files = (
+        sorted(Path(strategy_weights_path).glob("*.json"))
+        if strategy_files is None
+        else [Path(strategy_file) for strategy_file in strategy_files]
+    )
+    for strategy_file in strategy_files:
         payload = json.loads(strategy_file.read_text())
         strategy_name = str(payload.get("strategy", strategy_file.stem))
         trade_today = str2bool(payload.get("trade_today", True))
@@ -334,6 +409,7 @@ for credential in fetch_active_alpaca_credentials():
         api=api,
         is_paper=is_paper,
         is_live_trade=is_live_trade,
+        strategy_files=active_strategy_files,
     )
 
     credential_reports.append(
@@ -350,6 +426,27 @@ EMAIL_POSITIONS = str2bool(os.getenv("EMAIL_POSITIONS", False))
 message_sections_plain = []
 message_sections_html = []
 
+skipped_plain = ""
+skipped_html = ""
+if skipped_strategy_files:
+    skipped_plain = (
+        "\nSkipped strategies (updated_date did not match today):\n"
+        + "\n".join(
+        f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+        for item in skipped_strategy_files
+        )
+    )
+    skipped_html = (
+        "<h4>Skipped strategies (updated_date did not match today)</h4>"
+        "<ul>"
+        + "".join(
+            f"<li>{item['filename']}: updated_date={item['updated_date']} "
+            f"(expected {today})</li>"
+            for item in skipped_strategy_files
+        )
+        + "</ul>"
+    )
+
 for report in credential_reports:
     credential = report["credential"]
     total_portfolios_updated = len(credential_reports)
@@ -358,6 +455,7 @@ for report in credential_reports:
         dominant_regime=report["portfolio"]["dominant_regime"],
         weights_by_regime=weights_by_regime,
         equity_fraction=float(report["portfolio"].get("equity_fraction", 1.0)),
+        strategy_files=active_strategy_files,
     )
     strategy_allocations_plain = format_strategy_allocations_plain(strategy_allocations)
     strategy_allocations_html = format_strategy_allocations_html(strategy_allocations)
@@ -372,6 +470,7 @@ for report in credential_reports:
         f"Total Portfolios Updated: {total_portfolios_updated}\n"
         f"Regime: {report['portfolio']['dominant_regime']}\n"
         f"{strategy_allocations_plain}"
+        f"{skipped_plain}"
     )
 
     message_sections_html.append(
@@ -379,6 +478,7 @@ for report in credential_reports:
         f"Total Portfolios Updated: {total_portfolios_updated}<br>"
         f"Regime: {report['portfolio']['dominant_regime']}<br>"
         f"<pre>{strategy_allocations_html}</pre>"
+        f"{skipped_html}"
     )
 
 message_body_plain = "\n\n".join(message_sections_plain)
