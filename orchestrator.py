@@ -43,7 +43,7 @@ weights_by_regime = {
         "etf-trend-regime-crisis": 0.0,
     },
     "crisis": {
-        "trend": 1.0,
+        "trend": 0.0,
         "etf-trend-regime-fragile": 0.0,
         "etf-trend-regime-vol-shock": 0.0,
         "etf-trend-regime-crisis": 0.0,
@@ -147,8 +147,7 @@ if not active_strategy_files:
             for item in skipped_strategy_files
         )
         subject = (
-            "Quant Portfolio Orchestrator Report - "
-            f"No portfolio update - {today}"
+            "Quant Portfolio Orchestrator Report - " f"No portfolio update - {today}"
         )
         for to_address in to_addresses:
             ses.send_html_email(
@@ -429,12 +428,9 @@ message_sections_html = []
 skipped_plain = ""
 skipped_html = ""
 if skipped_strategy_files:
-    skipped_plain = (
-        "\nSkipped strategies (updated_date did not match today):\n"
-        + "\n".join(
+    skipped_plain = "\nSkipped strategies (updated_date did not match today):\n" + "\n".join(
         f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
         for item in skipped_strategy_files
-        )
     )
     skipped_html = (
         "<h4>Skipped strategies (updated_date did not match today)</h4>"
