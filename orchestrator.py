@@ -95,15 +95,18 @@ for filename in remote_files:
     )
 
     payload = json.loads(download_path.read_text())
-    updated_date = str(payload.get("updated_date", "")).strip()
+    updated_date_value = payload.get("updated_date")
+    updated_date = str(updated_date_value).strip() if updated_date_value is not None else ""
     if updated_date != today:
         download_path.unlink(missing_ok=True)
-        skipped_strategy_files.append(
-            {
-                "filename": filename,
-                "updated_date": updated_date or "missing",
-            }
-        )
+        if updated_date:
+            skipped_strategy_files.append(
+                {
+                    "filename": filename,
+                    "updated_date": updated_date,
+                    "expected_date": today,
+                }
+            )
         log(
             f"Skipping '{filename}': updated_date={updated_date or 'missing'} "
             f"does not match today ({today})",
@@ -139,11 +142,13 @@ if not active_strategy_files:
             from_address=os.getenv("FROM_ADDRESS", ""),
         )
         skipped_lines = "\n".join(
-            f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+            f"- {item['filename']}: updated_date={item['updated_date']} "
+            f"(expected {item['expected_date']})"
             for item in skipped_strategy_files
         )
         skipped_html = "<br>".join(
-            f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+            f"- {item['filename']}: updated_date={item['updated_date']} "
+            f"(expected {item['expected_date']})"
             for item in skipped_strategy_files
         )
         subject = (
@@ -429,7 +434,8 @@ skipped_plain = ""
 skipped_html = ""
 if skipped_strategy_files:
     skipped_plain = "\nSkipped strategies (updated_date did not match today):\n" + "\n".join(
-        f"- {item['filename']}: updated_date={item['updated_date']} (expected {today})"
+        f"- {item['filename']}: updated_date={item['updated_date']} "
+        f"(expected {item['expected_date']})"
         for item in skipped_strategy_files
     )
     skipped_html = (
@@ -437,7 +443,7 @@ if skipped_strategy_files:
         "<ul>"
         + "".join(
             f"<li>{item['filename']}: updated_date={item['updated_date']} "
-            f"(expected {today})</li>"
+            f"(expected {item['expected_date']})</li>"
             for item in skipped_strategy_files
         )
         + "</ul>"
