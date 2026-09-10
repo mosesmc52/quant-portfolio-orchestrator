@@ -51,9 +51,9 @@ weights_by_regime = {
 }
 
 remote_files = (
-    "etf-trend-regime-fragile.json",
-    "etf-trend-regime-crisis.json",
-    "etf-trend-regime-vol-shock.json",
+    # "etf-trend-regime-fragile.json",
+    # "etf-trend-regime-crisis.json",
+    # "etf-trend-regime-vol-shock.json",
     "etf-trend-rp-vt.json",
 )
 today = datetime.now().date().isoformat()
@@ -96,7 +96,9 @@ for filename in remote_files:
 
     payload = json.loads(download_path.read_text())
     updated_date_value = payload.get("updated_date")
-    updated_date = str(updated_date_value).strip() if updated_date_value is not None else ""
+    updated_date = (
+        str(updated_date_value).strip() if updated_date_value is not None else ""
+    )
     if updated_date != today:
         download_path.unlink(missing_ok=True)
         if updated_date:
@@ -433,10 +435,13 @@ message_sections_html = []
 skipped_plain = ""
 skipped_html = ""
 if skipped_strategy_files:
-    skipped_plain = "\nSkipped strategies (updated_date did not match today):\n" + "\n".join(
-        f"- {item['filename']}: updated_date={item['updated_date']} "
-        f"(expected {item['expected_date']})"
-        for item in skipped_strategy_files
+    skipped_plain = (
+        "\nSkipped strategies (updated_date did not match today):\n"
+        + "\n".join(
+            f"- {item['filename']}: updated_date={item['updated_date']} "
+            f"(expected {item['expected_date']})"
+            for item in skipped_strategy_files
+        )
     )
     skipped_html = (
         "<h4>Skipped strategies (updated_date did not match today)</h4>"
