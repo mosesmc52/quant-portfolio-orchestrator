@@ -416,6 +416,7 @@ for credential in fetch_active_alpaca_credentials():
         is_paper=is_paper,
         is_live_trade=is_live_trade,
         strategy_files=active_strategy_files,
+        cancel_open_orders=is_live_trade,
     )
 
     credential_reports.append(

@@ -12,8 +12,8 @@ from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
@@ -66,6 +66,28 @@ class AlpacaAPI:
     def list_positions(self):
         # alpaca-py naming
         return self.trading.get_all_positions()
+
+    def list_open_orders(self):
+        """Return orders that are still open, including accepted/unfilled orders."""
+        request = GetOrdersRequest(status=QueryOrderStatus.OPEN)
+        return self.trading.get_orders(filter=request)
+
+    def cancel_open_orders(self):
+        """Cancel all open orders and return the cancellation results."""
+        orders = self.list_open_orders()
+        cancellations = []
+        for order in orders:
+            order_id = str(order.id)
+            try:
+                result = self.trading.cancel_order_by_id(order_id)
+            except APIError as exc:
+                # An order can fill or leave the open state between the query
+                # and cancellation request. Continue so the next position
+                # refresh reflects the actual account state.
+                cancellations.append({"order_id": order_id, "error": str(exc)})
+            else:
+                cancellations.append({"order_id": order_id, "result": result})
+        return cancellations
 
     def get_position(self, symbol: str):
         # alpaca-py naming; raises APIError if not found

@@ -119,6 +119,7 @@ def run_portfolio_regime_iteration(
     is_live_trade,
     equity_fraction=1.0,
     strategy_files=None,
+    cancel_open_orders=False,
 ):
     weights_path = Path(strategy_weights_path).expanduser()
     regime_allocations = weights_by_regime.get(dominant_regime)
@@ -279,6 +280,36 @@ def run_portfolio_regime_iteration(
             "Proceeding with an empty target portfolio.",
             "warning",
         )
+
+    # A paused strategy with no explicit liquidation request must not be
+    # interpreted as a zero-target portfolio. In particular, when a strategy
+    # changes its symbols while trade_today=false, treating the old holdings
+    # as unrecognized would sell them while the new protected symbols would
+    # never be bought. Preserve the account exactly until the strategy is
+    # explicitly activated with trade_today=true.
+    if not active_target_weights_by_symbol and not liquidating_symbols:
+        log(
+            "All eligible strategies are paused with liquidation disabled; "
+            "preserving existing positions without generating orders",
+            "info",
+        )
+        return {
+            "dominant_regime": dominant_regime,
+            "orders_submitted": 0,
+            "target_weights": dict(target_weights_by_symbol),
+            "equity_fraction": equity_fraction,
+            "is_live_trade": is_live_trade,
+            "initialized_portfolio": initialized_portfolio,
+        }
+
+    if cancel_open_orders:
+        cancellations = api.cancel_open_orders()
+        log(
+            f"Canceled {len(cancellations)} open Alpaca order(s) before rebalance; "
+            "refreshing current positions",
+            "warning",
+        )
+        open_positions = api.list_positions()
 
     open_positions_by_symbol = {
         position.symbol: position for position in open_positions
